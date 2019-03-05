@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef FULL_MASK
+#define FULL_MASK (0xffffffff)
+#endif
+
 namespace {
   __device__ __forceinline__
   void getMinMax(fvec3 & _Xmin, fvec3 & _Xmax, const fvec3 & pos) {
@@ -7,12 +11,12 @@ namespace {
     fvec3 Xmax = Xmin;
 #pragma unroll
     for (int i=0; i<WARP_SIZE2; i++) {
-      Xmin[0] = min(Xmin[0], __shfl_xor(Xmin[0], 1<<i));
-      Xmin[1] = min(Xmin[1], __shfl_xor(Xmin[1], 1<<i));
-      Xmin[2] = min(Xmin[2], __shfl_xor(Xmin[2], 1<<i));
-      Xmax[0] = max(Xmax[0], __shfl_xor(Xmax[0], 1<<i));
-      Xmax[1] = max(Xmax[1], __shfl_xor(Xmax[1], 1<<i));
-      Xmax[2] = max(Xmax[2], __shfl_xor(Xmax[2], 1<<i));
+      Xmin[0] = min(Xmin[0], __shfl_xor_sync(FULL_MASK,Xmin[0], 1<<i));
+      Xmin[1] = min(Xmin[1], __shfl_xor_sync(FULL_MASK,Xmin[1], 1<<i));
+      Xmin[2] = min(Xmin[2], __shfl_xor_sync(FULL_MASK,Xmin[2], 1<<i));
+      Xmax[0] = max(Xmax[0], __shfl_xor_sync(FULL_MASK,Xmax[0], 1<<i));
+      Xmax[1] = max(Xmax[1], __shfl_xor_sync(FULL_MASK,Xmax[1], 1<<i));
+      Xmax[2] = max(Xmax[2], __shfl_xor_sync(FULL_MASK,Xmax[2], 1<<i));
     }
     _Xmin[0] = min(_Xmin[0], Xmin[0]);
     _Xmin[1] = min(_Xmin[1], Xmin[1]);
@@ -56,13 +60,13 @@ namespace {
 
   __device__ __forceinline__
   int exclusiveScanBool(const bool p) {
-    const uint b = __ballot(p);
+    const uint b = __ballot_sync(FULL_MASK,p);
     return __popc(b & lanemask_lt());
   }
 
   __device__ __forceinline__
   int reduceBool(const bool p) {
-    const uint b = __ballot(p);
+    const uint b = __ballot_sync(FULL_MASK,p);
     return __popc(b);
   }
 
@@ -100,7 +104,7 @@ namespace {
     const int flag = packedValue < 0;
     const int mask = -flag;
     const int value = (~mask & packedValue) + (mask & (-1-packedValue));
-    const int flags = __ballot(flag);
+    const int flags = __ballot_sync(FULL_MASK,flag);
     const int dist_block = __clz(__brev(flags));
     const int laneIdx = threadIdx.x & (WARP_SIZE - 1);
     const int distance = __clz(flags & lanemask_le()) + laneIdx - 31;

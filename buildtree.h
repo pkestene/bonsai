@@ -1,6 +1,10 @@
 #pragma once
 #include "warpscan.h"
 
+#ifndef FULL_MASK
+#define FULL_MASK (0xffffffff)
+#endif
+
 extern void sort(const int size, int * key, int * value);
 
 namespace {
@@ -36,13 +40,13 @@ namespace {
   __device__
   fvec3 minBlock(fvec3 Xmin) {
     const int laneIdx = threadIdx.x & (WARP_SIZE-1);
-    const int warpIdx = threadIdx.x >> WARP_SIZE2;
+    const int warpIdx = threadIdx.x >> WARP_SIZE2;    
 #pragma unroll
     for (int i=0; i<WARP_SIZE2; i++) {
       const int offset = 1 << i;
-      Xmin[0] = min(Xmin[0], __shfl_xor(Xmin[0], offset));
-      Xmin[1] = min(Xmin[1], __shfl_xor(Xmin[1], offset));
-      Xmin[2] = min(Xmin[2], __shfl_xor(Xmin[2], offset));
+      Xmin[0] = min(Xmin[0], __shfl_xor_sync(FULL_MASK,Xmin[0], offset));
+      Xmin[1] = min(Xmin[1], __shfl_xor_sync(FULL_MASK,Xmin[1], offset));
+      Xmin[2] = min(Xmin[2], __shfl_xor_sync(FULL_MASK,Xmin[2], offset));
     }
     const int NWARP2 = NTHREAD2 - WARP_SIZE2;
     const int NWARP = 1 << NWARP2;
@@ -55,9 +59,9 @@ namespace {
 #pragma unroll
       for (int i=0; i<NWARP2; i++) {
 	const int offset = 1 << i;
-	Xmin[0] = min(Xmin[0], __shfl_xor(Xmin[0], offset));
-	Xmin[1] = min(Xmin[1], __shfl_xor(Xmin[1], offset));
-	Xmin[2] = min(Xmin[2], __shfl_xor(Xmin[2], offset));
+	Xmin[0] = min(Xmin[0], __shfl_xor_sync(FULL_MASK,Xmin[0], offset));
+	Xmin[1] = min(Xmin[1], __shfl_xor_sync(FULL_MASK,Xmin[1], offset));
+	Xmin[2] = min(Xmin[2], __shfl_xor_sync(FULL_MASK,Xmin[2], offset));
       }
     }
     return Xmin;
@@ -67,12 +71,13 @@ namespace {
   fvec3 maxBlock(fvec3 Xmax) {
     const int laneIdx = threadIdx.x & (WARP_SIZE-1);
     const int warpIdx = threadIdx.x >> WARP_SIZE2;
+    
 #pragma unroll
     for (int i=0; i<WARP_SIZE2; i++) {
       const int offset = 1 << i;
-      Xmax[0] = max(Xmax[0], __shfl_xor(Xmax[0], offset));
-      Xmax[1] = max(Xmax[1], __shfl_xor(Xmax[1], offset));
-      Xmax[2] = max(Xmax[2], __shfl_xor(Xmax[2], offset));
+      Xmax[0] = max(Xmax[0], __shfl_xor_sync(FULL_MASK,Xmax[0], offset));
+      Xmax[1] = max(Xmax[1], __shfl_xor_sync(FULL_MASK,Xmax[1], offset));
+      Xmax[2] = max(Xmax[2], __shfl_xor_sync(FULL_MASK,Xmax[2], offset));
     }
     const int NWARP2 = NTHREAD2 - WARP_SIZE2;
     const int NWARP = 1 << NWARP2;
@@ -85,9 +90,9 @@ namespace {
 #pragma unroll
       for (int i=0; i<NWARP2; i++) {
 	const int offset = 1 << i;
-	Xmax[0] = max(Xmax[0], __shfl_xor(Xmax[0], offset));
-	Xmax[1] = max(Xmax[1], __shfl_xor(Xmax[1], offset));
-	Xmax[2] = max(Xmax[2], __shfl_xor(Xmax[2], offset));
+	Xmax[0] = max(Xmax[0], __shfl_xor_sync(FULL_MASK,Xmax[0], offset));
+	Xmax[1] = max(Xmax[1], __shfl_xor_sync(FULL_MASK,Xmax[1], offset));
+	Xmax[2] = max(Xmax[2], __shfl_xor_sync(FULL_MASK,Xmax[2], offset));
       }
     }
     return Xmax;
@@ -203,7 +208,7 @@ namespace {
 	const int sumLane = reduceBool(bodyOctant == octant);
 	if (sumLane > 0) {                                      // Avoid redundant instructions
 	  const int index = exclusiveScanBool(bodyOctant == octant);// Sparse lane index
-	  const int offset = __shfl(octantOffset, octant);      // Global offset
+	  const int offset = __shfl_sync(FULL_MASK,octantOffset, octant);      // Global offset
 	  if (bodyOctant == octant)                             // Prevent overwrite
 	    bodyIdx2 = offset + index;                          // Sorted index
 	}
@@ -244,10 +249,10 @@ namespace {
       int4 subOctantTemp = laneIdx < NWARP ? (*(int4*)&subOctantSizeLane[laneIdx*64+warpIdx*8+k]) : make_int4(0,0,0,0);
 #pragma unroll
       for (int i=NWARP2-1; i>=0; i--) {
-	subOctantTemp.x += __shfl_xor(subOctantTemp.x, 1<<i, NWARP);
-	subOctantTemp.y += __shfl_xor(subOctantTemp.y, 1<<i, NWARP);
-	subOctantTemp.z += __shfl_xor(subOctantTemp.z, 1<<i, NWARP);
-	subOctantTemp.w += __shfl_xor(subOctantTemp.w, 1<<i, NWARP);
+	subOctantTemp.x += __shfl_xor_sync(FULL_MASK,subOctantTemp.x, 1<<i, NWARP);
+	subOctantTemp.y += __shfl_xor_sync(FULL_MASK,subOctantTemp.y, 1<<i, NWARP);
+	subOctantTemp.z += __shfl_xor_sync(FULL_MASK,subOctantTemp.z, 1<<i, NWARP);
+	subOctantTemp.w += __shfl_xor_sync(FULL_MASK,subOctantTemp.w, 1<<i, NWARP);
       }
       if (laneIdx == 0)
 	*(int4*)&subOctantSize[warpIdx*8+k] = subOctantTemp;
@@ -289,7 +294,7 @@ namespace {
     int maxBodiesOctant = numBodiesOctantLane;
 #pragma unroll
     for (int i=2; i>=0; i--)
-      maxBodiesOctant = max(maxBodiesOctant, __shfl_xor(maxBodiesOctant, 1<<i));
+      maxBodiesOctant = max(maxBodiesOctant, __shfl_xor_sync(FULL_MASK,maxBodiesOctant, 1<<i));
     const int numNodesWarp = reduceBool(numBodiesOctantLane > NCRIT);
     if (threadIdx.x == 0 && numNodesWarp > 0) {
       numNodesScan = atomicAdd(&numNodesGlob, numNodesWarp);
@@ -337,7 +342,7 @@ namespace {
       int packedOctant = numBodiesOctantLane > NCRIT ? laneIdx << (3*numNodesLane) : 0;
 #pragma unroll
       for (int i=4; i>=0; i--)
-	packedOctant |= __shfl_xor(packedOctant, 1<<i);
+	packedOctant |= __shfl_xor_sync(FULL_MASK,packedOctant, 1<<i);
 
       if (threadIdx.x == 0) {
 	dim3 NBLOCK = min(max(maxBodiesOctant / NTHREAD, 1), 512);
@@ -388,7 +393,7 @@ namespace {
       int octantSizeTemp = octantSizeLane[k];
 #pragma unroll
       for (int i=4; i>=0; i--)
-	octantSizeTemp += __shfl_xor(octantSizeTemp, 1<<i);
+	octantSizeTemp += __shfl_xor_sync(FULL_MASK,octantSizeTemp, 1<<i);
       if (laneIdx == 0)
 	atomicAdd(&octantSize[k], octantSizeTemp);
     }

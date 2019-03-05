@@ -3,6 +3,10 @@
 #include "kernel.h"
 #include "warpscan.h"
 
+#ifndef FULL_MASK
+#define FULL_MASK (0xffffffff)
+#endif
+
 #define MEM_PER_WARP (4096 * WARP_SIZE)
 #define IF(x) (-(int)(x))
 
@@ -41,13 +45,13 @@ namespace {
       for (int i=0; i<NVEC4; i++) M4[i] = 0.0f;
     }
     for (int j=0; j<WARP_SIZE; j++) {
-      const fvec3 pos_j(__shfl(Xj[0],j), __shfl(Xj[1],j), __shfl(Xj[2],j));
+      const fvec3 pos_j(__shfl_sync(FULL_MASK,Xj[0],j), __shfl_sync(FULL_MASK,Xj[1],j), __shfl_sync(FULL_MASK,Xj[2],j));
 #pragma unroll
       for (int i=0; i<NVEC4; i++) {
-        M[4*i+0] = __shfl(M4[i][0], j);
-        M[4*i+1] = __shfl(M4[i][1], j);
-        M[4*i+2] = __shfl(M4[i][2], j);
-        M[4*i+3] = __shfl(M4[i][3], j);
+        M[4*i+0] = __shfl_sync(FULL_MASK,M4[i][0], j);
+        M[4*i+1] = __shfl_sync(FULL_MASK,M4[i][1], j);
+        M[4*i+2] = __shfl_sync(FULL_MASK,M4[i][2], j);
+        M[4*i+3] = __shfl_sync(FULL_MASK,M4[i][3], j);
       }
       for (int k=0; k<2; k++)
 	acc_i[k] = M2P(acc_i[k], pos_i[k], pos_j, *(fvecP*)M, EPS2);
@@ -63,8 +67,8 @@ namespace {
                  const float EPS2) {
     const fvec4 Xj = tex1Dfetch(texCellCenter, cellIdx);
     for (int j=0; j<WARP_SIZE; j++) {
-      const fvec3 pos_j(__shfl(Xj[0],j), __shfl(Xj[1],j), __shfl(Xj[2],j));
-      const int cellIdxWarp = __shfl(cellIdx,j);
+      const fvec3 pos_j(__shfl_sync(FULL_MASK,Xj[0],j), __shfl_sync(FULL_MASK,Xj[1],j), __shfl_sync(FULL_MASK,Xj[2],j));
+      const int cellIdxWarp = __shfl_sync(FULL_MASK,cellIdx,j);
       if (cellIdxWarp >= 0) {
 #pragma unroll
 	for (int i=0; i<NVEC4; i++) M4[i] = tex1Dfetch(texMultipole, NVEC4*cellIdxWarp+i);
@@ -126,7 +130,7 @@ namespace {
       const int numChild = sourceData.nchild() & IF(isSplit);   //  Number of child cells (masked by split flag)
       const int numChildScan = inclusiveScanInt(numChild);      //  Inclusive scan of numChild
       const int numChildLane = numChildScan - numChild;         //  Exclusive scan of numChild
-      const int numChildWarp = __shfl(numChildScan, WARP_SIZE-1);//  Total numChild of current warp
+      const int numChildWarp = __shfl_sync(FULL_MASK,numChildScan, WARP_SIZE-1);//  Total numChild of current warp
       sourceOffset += min(WARP_SIZE, numSources - sourceOffset);//  Increment source offset
       if (numChildWarp + numSources - sourceOffset > MEM_PER_WARP)//  If cell queue overflows
 	return make_uint2(0xFFFFFFFF,0xFFFFFFFF);               //  Exit kernel
@@ -137,7 +141,7 @@ namespace {
 
       // Approx
       const bool isApprox = !isClose && isSource;               //  Source cell can be used for M2P
-      const uint approxBallot = __ballot(isApprox);             //  Gather approx flags
+      const uint approxBallot = __ballot_sync(FULL_MASK,isApprox);             //  Gather approx flags
       const int numApproxLane = __popc(approxBallot & lanemask_lt());//  Exclusive scan of approx flags
       const int numApproxWarp = __popc(approxBallot);           //  Total isApprox for current warp
       int approxIdx = approxOffset + numApproxLane;             //  Approx cell index of current lane
@@ -166,7 +170,7 @@ namespace {
       const int numBodies = sourceData.nbody() & IF(isDirect);  //  Number of bodies in cell
       const int numBodiesScan = inclusiveScanInt(numBodies);    //  Inclusive scan of numBodies
       int numBodiesLane = numBodiesScan - numBodies;            //  Exclusive scan of numBodies
-      int numBodiesWarp = __shfl(numBodiesScan, WARP_SIZE-1);   //  Total numBodies of current warp
+      int numBodiesWarp = __shfl_sync(FULL_MASK,numBodiesScan, WARP_SIZE-1);   //  Total numBodies of current warp
       int tempOffset = 0;                                       //  Initialize temp queue offset
       while (numBodiesWarp > 0) {                               //  While there are bodies to process
 	tempQueue[laneIdx] = 1;                                 //   Initialize body queue
@@ -175,14 +179,14 @@ namespace {
 	  tempQueue[numBodiesLane] = -1-bodyBegin;              //    Put body in queue
 	}                                                       //   End if for direct flag
         const int bodyQueue = inclusiveSegscanInt(tempQueue[laneIdx], tempOffset);//  Inclusive segmented scan of temp queue
-        tempOffset = __shfl(bodyQueue, WARP_SIZE-1);            //   Last lane has the temp queue offset
+        tempOffset = __shfl_sync(FULL_MASK,bodyQueue, WARP_SIZE-1);            //   Last lane has the temp queue offset
 	if (numBodiesWarp >= WARP_SIZE) {                       //   If warp is full of bodies
 	  const fvec4 pos = tex1Dfetch(texBody, bodyQueue);     //    Load position of source bodies
 	  for (int j=0; j<WARP_SIZE; j++) {                     //    Loop over the warp size
-	    const fvec3 pos_j(__shfl(pos[0], j),                //     Get source x value from lane j
-			      __shfl(pos[1], j),                //     Get source y value from lane j
-			      __shfl(pos[2], j));               //     Get source z value from lane j
-	    const float q_j = __shfl(pos[3], j);                //     Get source w value from lane j
+	    const fvec3 pos_j(__shfl_sync(FULL_MASK,pos[0], j),                //     Get source x value from lane j
+			      __shfl_sync(FULL_MASK,pos[1], j),                //     Get source y value from lane j
+			      __shfl_sync(FULL_MASK,pos[2], j));               //     Get source z value from lane j
+	    const float q_j = __shfl_sync(FULL_MASK,pos[3], j);                //     Get source w value from lane j
 #pragma unroll                                                  //     Unroll loop
 	    for (int k=0; k<2; k++)                             //     Loop over two targets
 	      acc_i[k] = P2P(acc_i[k], pos_i[k], pos_j, q_j, EPS2);  //      Call P2P kernel
@@ -199,10 +203,10 @@ namespace {
 	  if (bodyOffset >= WARP_SIZE) {                        //    If this causes the body queue to spill
 	    const fvec4 pos = tex1Dfetch(texBody, tempQueue[laneIdx]);//  Load position of source bodies
 	    for (int j=0; j<WARP_SIZE; j++) {                   //     Loop over the warp size
-  	      const fvec3 pos_j(__shfl(pos[0], j),              //     Get source x value from lane j
-	  			__shfl(pos[1], j),              //     Get source y value from lane j
-				__shfl(pos[2], j));             //     Get source z value from lane j
-	      const float q_j = __shfl(pos[3], j);              //     Get source w value from lane j
+  	      const fvec3 pos_j(__shfl_sync(FULL_MASK,pos[0], j),              //     Get source x value from lane j
+	  			__shfl_sync(FULL_MASK,pos[1], j),              //     Get source y value from lane j
+				__shfl_sync(FULL_MASK,pos[2], j));             //     Get source z value from lane j
+	      const float q_j = __shfl_sync(FULL_MASK,pos[3], j);              //     Get source w value from lane j
 #pragma unroll                                                  //     Unroll loop
 	      for (int k=0; k<2; k++)                           //     Loop over two targets
 		acc_i[k] = P2P(acc_i[k], pos_i[k], pos_j, q_j, EPS2);// Call P2P kernel
@@ -237,10 +241,10 @@ namespace {
       const fvec4 pos = bodyQueue >= 0 ? tex1Dfetch(texBody, bodyQueue) :// Load position of source bodies
 	make_float4(0.0f, 0.0f, 0.0f, 0.0f);                    //  With padding for invalid lanes
       for (int j=0; j<WARP_SIZE; j++) {                         //  Loop over the warp size
-	const fvec3 pos_j(__shfl(pos[0], j),                    //   Get source x value from lane j
-			  __shfl(pos[1], j),                    //   Get source y value from lane j
-			  __shfl(pos[2], j));                   //   Get source z value from lane j
-	const float q_j = __shfl(pos[3], j);                    //   Get source w value from lane j
+	const fvec3 pos_j(__shfl_sync(FULL_MASK,pos[0], j),                    //   Get source x value from lane j
+			  __shfl_sync(FULL_MASK,pos[1], j),                    //   Get source y value from lane j
+			  __shfl_sync(FULL_MASK,pos[2], j));                   //   Get source z value from lane j
+	const float q_j = __shfl_sync(FULL_MASK,pos[3], j);                    //   Get source w value from lane j
 #pragma unroll                                                  //   Unroll loop
 	for (int k=0; k<2; k++)                                 //   Loop over two targets
 	  acc_i[k] = P2P(acc_i[k], pos_i[k], pos_j, q_j, EPS2); //    Call P2P kernel
@@ -280,7 +284,7 @@ namespace {
       int targetIdx = 0;
       if (laneIdx == 0)
         targetIdx = atomicAdd(&counterGlob, 1);
-      targetIdx = __shfl(targetIdx, 0, WARP_SIZE);
+      targetIdx = __shfl_sync(FULL_MASK,targetIdx, 0, WARP_SIZE);
       if (targetIdx >= numTargets) return;
 
       const int2 target = targetRange[targetIdx];
@@ -295,12 +299,12 @@ namespace {
       fvec3 Xmax = Xmin;
       for (int i=0; i<2; i++)
 	getMinMax(Xmin, Xmax, pos_i[i]);
-      Xmin[0] = __shfl(Xmin[0],0);
-      Xmin[1] = __shfl(Xmin[1],0);
-      Xmin[2] = __shfl(Xmin[2],0);
-      Xmax[0] = __shfl(Xmax[0],0);
-      Xmax[1] = __shfl(Xmax[1],0);
-      Xmax[2] = __shfl(Xmax[2],0);
+      Xmin[0] = __shfl_sync(FULL_MASK,Xmin[0],0);
+      Xmin[1] = __shfl_sync(FULL_MASK,Xmin[1],0);
+      Xmin[2] = __shfl_sync(FULL_MASK,Xmin[2],0);
+      Xmax[0] = __shfl_sync(FULL_MASK,Xmax[0],0);
+      Xmax[1] = __shfl_sync(FULL_MASK,Xmax[1],0);
+      Xmax[2] = __shfl_sync(FULL_MASK,Xmax[2],0);
       const fvec3 targetCenter = (Xmax+Xmin) * 0.5f;
       const fvec3 targetSize = (Xmax-Xmin) * 0.5f;
       fvec4 acc_i[2] = {0.0f, 0.0f};
@@ -336,10 +340,10 @@ namespace {
       }
 #pragma unroll
       for (int i=0; i<WARP_SIZE2; i++) {
-	maxP2P  = max(maxP2P, __shfl_xor(maxP2P, 1<<i));
-	sumP2P += __shfl_xor(sumP2P, 1<<i);
-	maxM2P  = max(maxM2P, __shfl_xor(maxM2P, 1<<i));
-	sumM2P += __shfl_xor(sumM2P, 1<<i);
+	maxP2P  = max(maxP2P, __shfl_xor_sync(FULL_MASK,maxP2P, 1<<i));
+	sumP2P += __shfl_xor_sync(FULL_MASK,sumP2P, 1<<i);
+	maxM2P  = max(maxM2P, __shfl_xor_sync(FULL_MASK,maxM2P, 1<<i));
+	sumM2P += __shfl_xor_sync(FULL_MASK,sumM2P, 1<<i);
       }
       if (laneIdx == 0) {
 	atomicMax(&maxP2PGlob, maxP2P);
@@ -379,8 +383,8 @@ namespace {
 	    Xperiodic[1] = iy * cycle;
 	    Xperiodic[2] = iz * cycle;
 	    for (int j=0; j<WARP_SIZE; j++) {
-	      const fvec3 pos_j(__shfl(pos[0],j),__shfl(pos[1],j),__shfl(pos[2],j));
-	      const float q_j = __shfl(pos[3],j);
+	      const fvec3 pos_j(__shfl_sync(FULL_MASK,pos[0],j),__shfl_sync(FULL_MASK,pos[1],j),__shfl_sync(FULL_MASK,pos[2],j));
+	      const float q_j = __shfl_sync(FULL_MASK,pos[3],j);
 	      fvec3 dX = pos_j - pos_i - Xperiodic;
 	      const float R2 = norm(dX) + EPS2;
 	      const float invR = rsqrtf(R2);
