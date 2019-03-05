@@ -33,7 +33,7 @@ namespace {
     uint result;
     asm("{.reg .u32 r0;"
 	".reg .pred p;"
-	"shfl.up.b32 r0|p, %1, %2, 0;"
+	"shfl.sync.up.b32 r0|p, %1, %2, 0, 0xFFFFFFFF;"
 	"@p add.u32 r0, r0, %3;"
 	"mov.u32 %0, r0;}"
 	: "=r"(result) : "r"(partial), "r"(offset), "r"(partial));
